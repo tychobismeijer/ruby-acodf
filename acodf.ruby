@@ -1,5 +1,4 @@
 require 'narray'
-require 'nimage'
 require 'cairo'
 
 class AcoDF
@@ -8,8 +7,8 @@ class AcoDF
     def initialize(points)
         @npoints = points.length
         @points = points;
-        @pheremone = NArray.float(@npoints, @npoints).random!;
-        #@pheremone = NArray.float(@npoints, @npoints)
+        @pheremone = NArray.float(@npoints, @npoints).random!();
+        @delta_pheremone = NArray.float(@npoints, @npoints).fill!(0.0)
     end
 
     def dist(x, y)
@@ -31,22 +30,19 @@ class AcoDF
     def debug_pheremone()
         print("Showing pheremone data. size = ", @npoints, "\n")
         print(@pheremone.to_a, "\n");
-        #win = NImage.show @pheremone
-        #print "Hit return key..."
-        #STDIN.getc
-        #win.close
     end
 
     def inc_pheremone(x, y, q)
         if (x < y) then
             x, y = y, x
         end
-        @pheremone[x,y] += q
+        @delta_pheremone[x,y] += q
     end
 
-    def decay()
-        decay_speed = 0.9
-        @pheremone = @pheremone*decay_speed
+    def update_pheremone
+        decay_speed = 0.999
+        @pheremone = (@pheremone * decay_speed) + @delta_pheremone
+        @delta_pheremone.fill!(0.0)
     end
 
     def graph (filename)
@@ -96,13 +92,13 @@ class Ant
         @walk = []
     end
 
-    def walk(length)
+    def walk(length, ignore_pheremone=false)
         first_step()
-        (length-1).times { step() }
+        (length-1).times { step(ignore_pheremone) }
     end
 
     def drop_pheremone()
-        pheremone_quantity = 1;
+        pheremone_quantity = 10;
         walk_length = 0
         for i in (0...(@walk.length)-1) do
             walk_length += @field.dist(@walk[i], @walk[i+1]);
@@ -126,11 +122,15 @@ class Ant
         @walk.push(rand@field.npoints)
     end
 
-    def step()
-        @walk.push(select_city);
+    def step(ignore_pheremone)
+        if ignore_pheremone then
+            @walk.push(select_city_pheremone());
+        else
+            @walk.push(select_city_random());
+        end
     end
 
-    def select_city()
+    def select_city_pheremone()
         raise "No cities left to select from" if (@walk.length >= @field.npoints) 
         n_cities = 10
         cities = []
@@ -144,9 +144,18 @@ class Ant
             @field.dist(x, @walk.last)*@field.pheremone(x, @walk.last) <=>
             @field.dist(y, @walk.last)*@field.pheremone(y, @walk.last)
         }
-        cities[0]
+        return cities[0]
+    end
+
+    def select_city_random()
+        raise "No cities left to select from" if (@walk.length >= @field.npoints) 
+        begin
+            city = rand(@field.npoints)
+        end while (@walk.index(city) != nil)
+        return city
     end
 end
+
 
 data = [[10 , 20],
         [4 , 2],
@@ -159,12 +168,32 @@ data = [[10 , 20],
 f = AcoDF.new(data);
 f.graph("before.pdf")
 a = Ant.new(f);
-1000.times {
-    10.times {
-        a.walk(3)
+cities_to_visit = 5.0
+cooling_rate = 0.95
+n_ants = 10
+100.times {
+    #T_0
+    n_ants.times {
+        a.walk(cities_to_visit.ceil, ignore_pheremone=true)
         a.drop_pheremone()
         a.reset()
     }
-    f.decay()
+    f.update_pheremone()
+    #T_1_1
+    n_ants.times {
+        a.walk((((2*cities_to_visit)/2)-(cities_to_visit/6)).ceil)
+        a.drop_pheremone()
+        a.reset()
+    }
+    f.update_pheremone()
+    #T_1_2
+    n_ants.times {
+        a.walk((((2*cities_to_visit)/2)-(2*cities_to_visit/6)).ceil)
+        a.drop_pheremone()
+        a.reset()
+    }
+    f.update_pheremone()
+
+    cities_to_visit = cities_to_visit * cooling_rate;
 }
 f.graph("after.pdf")
